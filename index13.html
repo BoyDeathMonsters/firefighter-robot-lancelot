@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title> Visualisation 3D du Robot</title>
+  <style>
+    body { margin: 0; display: flex; justify-content: flex-end; align-items: flex-end; height: 100vh; overflow: hidden; background: #111; color: #fff; font-family: sans-serif; }
+    #robot-3d-container {
+      border: 1px solid #444;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-right: 25px;
+      background: #111;
+    }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <div id="robot-3d-container" style="width: 90%; height: 90%; position: relative">
+    <div id="angles" style="position: absolute; top: 10px; left: 10px; z-index: 2; background: rgba(0, 0, 0, 0.6); padding: 6px 10px; border-radius: 6px; font-size: 12px;">
+      <p id="pitch">Pitch: 0°</p>
+      <p id="roll">Roll: 0°</p>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.130.1/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.130.1/examples/js/loaders/GLTFLoader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.130.1/examples/js/loaders/DRACOLoader.js"></script>
+
+  <script>
+    let robotModel = null;
+    let solAnchor = null;
+    let robotGroup = new THREE.Object3D();
+    let floors = [];
+    let murs3D = [];
+
+    const floorCount = 6;
+    const floorLength = 20;
+    const floorWidth = 100;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer();
+    const container = document.getElementById('robot-3d-container');
+    renderer.setSize(container.clientWidth, container.clientHeight);
+    container.appendChild(renderer.domElement);
+    camera.aspect = container.clientWidth / container.clientHeight;
+    camera.updateProjectionMatrix();
+
+    scene.add(robotGroup);
+
+    // Lumière
+    scene.add(new THREE.PointLight(0xffffff, 1, 100).position.set(10, 10, 10));
+    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+    // Caméra
+    const cameraRig = new THREE.Object3D();
+    cameraRig.position.set(5, 13, 25);
+    cameraRig.add(camera);
+    scene.add(cameraRig);
+
+    // Loaders
+    const dracoLoader = new THREE.DRACOLoader();
+    dracoLoader.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.130.1/examples/js/libs/draco/');
+    const loader = new THREE.GLTFLoader();
+    loader.setDRACOLoader(dracoLoader);
+
+    loader.load('/static/models/robot.glb', function (gltf) {
+      robotModel = gltf.scene;
+      robotModel.scale.set(10, 10, 10);
+      robotModel.rotation.set(3 / 2 * Math.PI, 0, 0);
+
+      const axesHelper = new THREE.AxesHelper(20);
+      scene.add(axesHelper);
+
+      robotGroup.add(robotModel);
+
+      const box = new THREE.Box3().setFromObject(robotModel);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      robotModel.position.y -= box.min.y;
+
+      solAnchor = new THREE.Object3D();
+      solAnchor.position.set(0, size.y / 3, -size.z / 2);
+      robotGroup.add(solAnchor);
+
+      for (let i = 0; i < floorCount; i++) {
+        const z = i * floorLength;
+        const f = createFloor(z);
+        solAnchor.add(f);
+        floors.push(f);
+      }
+    });
+
+    function polarToCartesian(angleDeg, distance) {
+      const angleRad = angleDeg * Math.PI / 180;
+      const x = Math.cos(angleRad) * distance;
+      const z = Math.sin(angleRad) * distance;
+      return { x, z };
+    }
+
+    function createFloor(zOffset) {
+      const geo = new THREE.PlaneGeometry(floorWidth, floorLength, 10, 10);
+      const mat = new THREE.MeshStandardMaterial({ color: 0x222222, side: THREE.DoubleSide });
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.z = zOffset;
+
+      const grid = new THREE.GridHelper(floorWidth, 50, 0x444444, 0x444444);
+      grid.rotation.x = Math.PI / 2;
+      mesh.add(grid);
+
+      return mesh;
+    }
+    
+    
+    let mursMemoire = {}; // clé : angle, valeur : mesh
+    
+    function updateMurScene(data) {
+      if (!robotModel) return;
+
+      
+      for (let angle in mursMemoire) {
+        if (angle >= -90 && angle <= 90) {
+          solAnchor.remove(mursMemoire[angle]);
+          delete mursMemoire[angle];
+        }
+      }
+
+      // Taille du robot
+      const box = new THREE.Box3().setFromObject(robotModel);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      const largeurRobot = size.x;
+      const hauteurRobot = size.y;
+
+      data.forEach(p => {
+        const { angle, distance } = p;
+        if (distance > 0 && distance < 400) {
+          const { x, z } = polarToCartesian(angle, distance / 10); // Échelle
+
+          // Dégradé couleur rouge (proche) → vert (loin)
+          const maxDistance = 400;
+          const t = distance / maxDistance;
+          const color = new THREE.Color().setHSL(t * 0.33, 1, 0.5); // HSL: 0 (rouge) à 0.33 (vert)
+
+          const geo = new THREE.BoxGeometry(largeurRobot, hauteurRobot, 5);
+          const mat = new THREE.MeshStandardMaterial({ color: color });
+          const mur = new THREE.Mesh(geo, mat);
+          mur.position.set(x, hauteurRobot / 2, z);
+          solAnchor.add(mur);
+          mursMemoire[angle] = mur;
+        }
+      });
+    }
+
+
+    // Animation sol
+    let solAvance = false;
+
+    function animate() {
+      requestAnimationFrame(animate);
+      if (robotModel) {
+        const robotPosition = robotModel.position;
+        camera.position.set(
+          robotPosition.x + 5,  
+          robotPosition.y + 5,  
+          robotPosition.z + 10
+        );
+        camera.lookAt(robotPosition);
+      }
+
+
+      if (solAvance && solAnchor) {
+        for (let i = 0; i < floorCount; i++) {
+          floors[i].position.z -= 0.5;
+          if (floors[i].position.z < -floorLength * 3) {
+            floors[i].position.z += floorLength * floorCount;
+          }
+        }
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    animate();
+
+    // Orientation gyroscope
+    setInterval(() => {
+      fetch('/get_orientation')
+        .then(res => res.json())
+        .then(data => {
+          const pitch = data.pitch;
+          const roll = data.roll;
+          const rotThreshold = 15 * Math.PI / 180;
+          document.getElementById('pitch').textContent = 'Pitch: ' + pitch.toFixed(2) + '°';
+          document.getElementById('roll').textContent = 'Roll: ' + roll.toFixed(2) + '°';
+          
+
+          if (robotGroup && Math.abs(pitch) > rotThreshold && Math.abs(roll) > rotThreshold) {
+            robotGroup.rotation.x = pitch * Math.PI / 180;
+            robotGroup.rotation.z = roll * Math.PI / 180;
+          }
+        });
+    
+      fetch('/get_yaw')
+        .then(res => res.json())
+        .then(data => {
+          console.log('Données yaw/position reçues :', data);
+          const yaw = data.yaw;
+          const move_x = data.move_x;
+          const move_z = data.move_z;
+          const yawThreshold = 15 * Math.PI / 180; // 1° en radians
+          const step = 1;
+
+          
+          if (Math.abs(yaw) > yawThreshold && robotModel) {
+            robotModel.rotation.z = yaw;            
+            }
+          if (move_x !== 0 || move_z !== 0 && robotModel) {
+            robotModel.position.x += move_x * step;
+            robotModel.position.z += move_z * step;
+            }
+           });
+                
+      fetch('/api/murs')
+        .then(response => response.json())
+        .then(data => {
+          // Met à jour les murs dans la scène 3D avec data
+          updateMurScene(data);
+        });
+        
+    }
+    , 100);
+
+    function recalibrateSensor() {
+      fetch('/recalibrate', {
+        method: 'POST'
+      })
+      .then(response => response.json())
+      .then(data => {
+        console.log(data.message);
+        alert("Calibration relancée !");
+      })
+      .catch(error => {
+        console.error("Erreur recalibration :", error);
+      });
+    }
+    
+    
+
+    // Contrôle clavier manuel
+    document.addEventListener('keydown', (e) => {
+      if (!robotModel) return;
+      const step = 0.05;
+      switch (e.key.toLowerCase()) {
+        case 'z': robotModel.rotation.x += step; break;
+        case 's': robotModel.rotation.x -= step; break;
+        case 'q': robotModel.rotation.y += step; break;
+        case 'd': robotModel.rotation.y -= step; break;
+        case 'a': robotModel.rotation.z += step; break;
+        case 'e': robotModel.rotation.z -= step; break;
+      }
+    });
+  </script>
+  <button onclick="recalibrateSensor()">Recalibrer</button>
+</body>
+</html>
+

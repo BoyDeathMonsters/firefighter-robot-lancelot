@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Visualisation 3D du Robot</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #111;
+            color: #fff;
+            font-family: sans-serif;
+        }
+
+        #angles {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 1;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 10px;
+        }
+
+        canvas {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div id="angles">
+        <p id="pitch">Pitch: 0°</p>
+        <p id="roll">Roll: 0°</p>
+    </div>
+
+    <!-- Librairies Three.js -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.130.1/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.130.1/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.130.1/examples/js/loaders/DRACOLoader.js"></script>
+
+    <script>
+        let robotModel = null;
+
+        // Initialisation scène / caméra / rendu
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Lumières
+        const light = new THREE.PointLight(0xffffff, 1, 100);
+        light.position.set(10, 10, 10);
+        scene.add(light);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+        // Position caméra
+        camera.position.set(3, 3, 5);
+        camera.lookAt(0, 0, 0);
+
+        // DRACO + GLTF Loaders
+        const dracoLoader = new THREE.DRACOLoader();
+        dracoLoader.setDecoderPath('https://cdn.jsdelivr.net/npm/three@0.130.1/examples/js/libs/draco/');
+        const loader = new THREE.GLTFLoader();
+        loader.setDRACOLoader(dracoLoader);
+
+        // Chargement du modèle robot2.glb
+        loader.load('/static/models/robot2.glb', function (gltf) {
+            robotModel = gltf.scene;
+            robotModel.scale.set(10, 10, 10);
+            robotModel.position.set(0, -1, 0);
+            robotModel.rotation.x = Math.PI / 2;  // Tourner de 90° autour de X
+            robotModel.rotation.y = 0;            // Pas de rotation Y
+            robotModel.rotation.z = 0;            // Pas de rotation Z
+            scene.add(robotModel);
+            console.log("Modèle chargé !");
+        }, undefined, function (error) {
+            console.error("Erreur de chargement du modèle:", error);
+        });
+
+        // Animation
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // Mise à jour orientation
+        setInterval(() => {
+            fetch('/get_orientation')
+                .then(response => response.json())
+                .then(data => {
+                    const pitch = data.pitch;
+                    const roll = data.roll;
+
+                    document.getElementById('pitch').textContent = 'Pitch: ' + pitch.toFixed(2) + '°';
+                    document.getElementById('roll').textContent = 'Roll: ' + roll.toFixed(2) + '°';
+
+                    if (robotModel) {
+                        // Appliquer les rotations
+                        robotModel.rotation.x = pitch * Math.PI / 180;
+                        robotModel.rotation.z = roll * Math.PI / 180;
+                    }
+                })
+                .catch(err => console.error("Erreur fetch:", err));
+        }, 100);
+    </script>
+</body>
+</html>
+
